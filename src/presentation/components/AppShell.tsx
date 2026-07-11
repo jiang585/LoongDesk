@@ -17,7 +17,7 @@ const navigation = [
 ]
 
 export function AppShell() {
-  const { loading, error, notice, setNotice, settings } = useApp()
+  const { loading, error, notice, setNotice, settings, captureConcern } = useApp()
   const [collapsed, setCollapsed] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -26,12 +26,17 @@ export function AppShell() {
     const handler = (event: KeyboardEvent) => {
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'v') {
         event.preventDefault()
-        navigate('/concerns?capture=1')
+        void navigator.clipboard.readText()
+          .then(async (text) => {
+            const result = await captureConcern(text, 'paste')
+            setNotice(result.duplicate ? '此内容已在关心库' : '小安子已收下剪贴板内容')
+          })
+          .catch(() => { setNotice('无法读取剪贴板，请检查系统权限'); navigate('/concerns?capture=1') })
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [navigate])
+  }, [captureConcern, navigate, setNotice])
 
   useEffect(() => {
     if (!notice) return
@@ -75,4 +80,3 @@ export function AppShell() {
     </div>
   )
 }
-

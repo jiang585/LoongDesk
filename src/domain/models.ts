@@ -96,6 +96,11 @@ export interface AppSettings {
   vaultConfigured: boolean
   refreshIntervalMinutes: number
   cacheRetentionDays: number
+  /** Desktop accessibility scale. Stored locally and shared by all windows. */
+  fontScale: 1 | 1.12 | 1.25
+  petEnabled: boolean
+  petAlwaysOnTop: boolean
+  petBounds: { x: number; y: number } | null
 }
 
 export interface AppBackup {
@@ -117,5 +122,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   vaultConfigured: false,
   refreshIntervalMinutes: 30,
   cacheRetentionDays: 30,
+  fontScale: 1,
+  petEnabled: true,
+  petAlwaysOnTop: true,
+  petBounds: null,
 }
-

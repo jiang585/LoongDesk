@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Database, Download, Eye, EyeOff, KeyRound, LockKeyhole, RefreshCw, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, Check, Database, Download, Eye, EyeOff, KeyRound, LockKeyhole, MonitorUp, RefreshCw, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { AppBackup } from '../../domain/models'
 import { backupSchema } from '../../domain/schemas'
@@ -76,6 +76,15 @@ export function SettingsPage() {
       </section>
 
       <section className="paper-panel settings-card">
+        <header><span className="settings-icon"><MonitorUp size={19} /></span><div><h2>桌面与小安子</h2><p>调整阅读大小，并管理始终置顶的桌面小安子。</p></div></header>
+        <div className="settings-body form-row">
+          <label><span>界面字号</span><select value={settings.fontScale} onChange={(event) => void saveSettings({ ...settings, fontScale: Number(event.target.value) as typeof settings.fontScale })}><option value={1}>标准（16px 正文）</option><option value={1.12}>较大（112%）</option><option value={1.25}>大字（125%）</option></select></label>
+          <label><span>小安子</span><select value={settings.petEnabled ? 'show' : 'hide'} onChange={(event) => void saveSettings({ ...settings, petEnabled: event.target.value === 'show' })}><option value="show">显示在桌面</option><option value="hide">暂时隐藏</option></select></label>
+          <label><span>窗口层级</span><select value={settings.petAlwaysOnTop ? 'top' : 'normal'} onChange={(event) => void saveSettings({ ...settings, petAlwaysOnTop: event.target.value === 'top' })}><option value="top">始终置顶</option><option value="normal">普通窗口</option></select></label>
+        </div>
+      </section>
+
+      <section className="paper-panel settings-card">
         <header><span className="settings-icon"><RefreshCw size={19} /></span><div><h2>模型与刷新</h2><p>控制问答模型和奏报缓存策略。</p></div></header>
         <div className="settings-body form-row">
           <label><span>默认模型</span><select value={settings.model} onChange={(event) => void saveSettings({ ...settings, model: event.target.value as typeof settings.model, thinkingEnabled: event.target.value === 'deepseek-v4-pro' })}><option value="deepseek-v4-flash">DeepSeek V4 Flash</option><option value="deepseek-v4-pro">DeepSeek V4 Pro</option></select></label>
@@ -102,4 +111,3 @@ export function SettingsPage() {
     <section className="privacy-manifest"><ShieldCheck size={18} /><div><strong>御案不设账户、云同步、广告或遥测。</strong><p>仅在问答、刷新 RSS/网页快照和主动打开原文时访问网络。</p></div></section>
   </div>
 }
-

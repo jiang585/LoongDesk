@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
+    fs,
     net::{IpAddr, Ipv6Addr},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -13,12 +14,31 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{ipc::Channel, Manager, State};
+use tauri::{ipc::Channel, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use url::Url;
 
 const MAX_REMOTE_BYTES: usize = 2 * 1024 * 1024;
 const DEEPSEEK_URL: &str = "https://api.deepseek.com/chat/completions";
+
+#[tauri::command]
+fn read_dropped_text(paths: Vec<String>) -> Result<Vec<String>, String> {
+    paths
+        .into_iter()
+        .take(8)
+        .map(|path| {
+            let lower = path.to_ascii_lowercase();
+            if !(lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".markdown")) {
+                return Err("小安子只接收 .txt 或 .md 文本文件".to_string());
+            }
+            let metadata = fs::metadata(&path).map_err(|_| "无法读取拖入文件".to_string())?;
+            if metadata.len() > 1_048_576 {
+                return Err("拖入文件超过 1MB 限制".to_string());
+            }
+            fs::read_to_string(&path).map_err(|_| "拖入文件不是可读取的 UTF-8 文本".to_string())
+        })
+        .collect()
+}
 
 #[derive(Default)]
 struct CancellationRegistry(Mutex<HashMap<String, Arc<AtomicBool>>>);
@@ -469,6 +489,23 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            let mut pet_builder = WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html#/pet".into()))
+                .title("小安子")
+                .inner_size(230.0, 320.0)
+                .min_inner_size(210.0, 280.0)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .resizable(false);
+            if let Some(monitor) = app.primary_monitor()? {
+                let scale = monitor.scale_factor();
+                let work = monitor.work_area();
+                let x = (work.position.x as f64 + work.size.width as f64 - 250.0 * scale) / scale;
+                let y = (work.position.y as f64 + work.size.height as f64 - 350.0 * scale) / scale;
+                pet_builder = pet_builder.position(x.max(0.0), y.max(0.0));
+            }
+            pet_builder.build()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -477,6 +514,7 @@ pub fn run() {
             deepseek_stream,
             cancel_deepseek,
             deepseek_json,
+            read_dropped_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running 御案");

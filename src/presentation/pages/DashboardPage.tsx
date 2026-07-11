@@ -1,6 +1,7 @@
 import { ArrowRight, Bot, Check, Circle, Clock3, LibraryBig, Newspaper, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import imperialDesk from '../../assets/generated/imperial-desk.png'
+import xiaoAnzi from '../../assets/generated/xiao-anzi-v2.png'
 import { useApp } from '../state/AppContext'
 import { EmptyState } from '../components/EmptyState'
 
@@ -27,7 +28,7 @@ export function DashboardPage() {
           </div>
         </div>
         <Link to="/assistant" className="attendant-orb" aria-label="打开小太监">
-          <img src={imperialDesk} alt="小太监小安子的绘制肖像" />
+          <img src={xiaoAnzi} alt="Q版小安子" />
           <span><Bot size={14} /> 小安子候旨</span>
         </Link>
       </section>
@@ -67,4 +68,3 @@ export function DashboardPage() {
     </div>
   )
 }
-

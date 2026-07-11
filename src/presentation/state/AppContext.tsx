@@ -28,6 +28,8 @@ import { DeepSeekAssistantProvider } from '../../infrastructure/assistantProvide
 import { TauriContentProvider } from '../../infrastructure/contentProvider'
 import { getPersistence } from '../../infrastructure/persistence'
 import { LocalSecretStore } from '../../infrastructure/secretStore'
+import { emit, listen } from '@tauri-apps/api/event'
+import { isTauri } from '../../infrastructure/platform'
 
 export const DEFAULT_SOURCES: Array<Pick<ContentSource, 'name' | 'kind' | 'url'>> = [
   { name: '中新网·即时新闻', kind: 'rss', url: 'https://www.chinanews.com.cn/rss/scroll-news.xml' },
@@ -68,6 +70,7 @@ interface AppContextValue {
   importBackup(backup: AppBackup): Promise<void>
   clearAllData(): Promise<void>
   setNotice(message: string | null): void
+  reload(): Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -119,6 +122,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     })()
   }, [reload])
 
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: (() => void) | undefined
+    void listen('yuan://data-changed', () => void reload()).then((dispose) => { unlisten = dispose })
+    return () => unlisten?.()
+  }, [reload])
+
+  const broadcastChange = useCallback(() => {
+    if (isTauri()) void emit('yuan://data-changed')
+  }, [])
+
   const createTodo = useCallback(async (input: Partial<Todo> & Pick<Todo, 'title'>) => {
     const now = nowIso()
     const todo: Todo = {
@@ -129,19 +143,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     await persistenceRef.current!.saveTodo(todo)
     setTodos((values) => [todo, ...values.filter((item) => item.id !== todo.id)])
+    broadcastChange()
     return todo
-  }, [])
+  }, [broadcastChange])
 
   const updateTodo = useCallback(async (todo: Todo) => {
     const next = { ...todo, updatedAt: nowIso() }
     await persistenceRef.current!.saveTodo(next)
     setTodos((values) => values.map((item) => item.id === next.id ? next : item))
-  }, [])
+    broadcastChange()
+  }, [broadcastChange])
 
   const deleteTodo = useCallback(async (id: string) => {
     await persistenceRef.current!.deleteTodo(id)
     setTodos((values) => values.filter((item) => item.id !== id))
-  }, [])
+    broadcastChange()
+  }, [broadcastChange])
 
   const captureConcern = useCallback(async (
     text: string,
@@ -171,25 +188,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!duplicate) {
       await persistenceRef.current!.saveConcern(concern)
       setConcerns((values) => [concern, ...values])
+      broadcastChange()
     }
     return { concern, duplicate }
-  }, [concerns])
+  }, [broadcastChange, concerns])
 
   const updateConcern = useCallback(async (concern: Concern) => {
     const next = { ...concern, updatedAt: nowIso() }
     await persistenceRef.current!.saveConcern(next)
     setConcerns((values) => values.map((item) => item.id === next.id ? next : item))
-  }, [])
+    broadcastChange()
+  }, [broadcastChange])
 
   const deleteConcern = useCallback(async (id: string) => {
     await persistenceRef.current!.deleteConcern(id)
     setConcerns((values) => values.filter((item) => item.id !== id))
-  }, [])
+    broadcastChange()
+  }, [broadcastChange])
 
   const saveSource = useCallback(async (source: ContentSource) => {
     await persistenceRef.current!.saveSource(source)
     setSources((values) => [source, ...values.filter((item) => item.id !== source.id)])
-  }, [])
+    broadcastChange()
+  }, [broadcastChange])
 
   const addDefaultSources = useCallback(async () => {
     for (const value of DEFAULT_SOURCES) {
@@ -202,7 +223,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await persistenceRef.current!.deleteSource(id)
     setSources((values) => values.filter((item) => item.id !== id))
     setNews((values) => values.filter((item) => item.sourceId !== id))
-  }, [])
+    broadcastChange()
+  }, [broadcastChange])
 
   const refreshNews = useCallback(async (sourceId?: string) => {
     if (refreshLock.current) return
@@ -265,7 +287,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const saveSettings = useCallback(async (next: AppSettings) => {
     await persistenceRef.current!.saveSettings(next)
     setSettings(next)
-  }, [])
+    broadcastChange()
+  }, [broadcastChange])
 
   const completeOnboarding = useCallback(async (shouldAddSources: boolean) => {
     if (shouldAddSources) await addDefaultSources()
@@ -285,7 +308,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     await persistenceRef.current!.saveMessage(message)
     setMessages((values) => [...values.filter((item) => item.id !== message.id), message])
-  }, [sessions])
+    broadcastChange()
+  }, [broadcastChange, sessions])
 
   const applyProposal = useCallback(async (proposal: AiProposal) => {
     for (const update of proposal.concernUpdates) {
@@ -315,12 +339,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     secretStore, assistant, createTodo, updateTodo, deleteTodo, captureConcern,
     updateConcern, deleteConcern, saveSource, addDefaultSources, deleteSource,
     refreshNews, saveSettings, completeOnboarding, saveMessage, applyProposal,
-    exportBackup, importBackup, clearAllData, setNotice,
+    exportBackup, importBackup, clearAllData, setNotice, reload,
   }), [
     addDefaultSources, applyProposal, captureConcern, clearAllData, completeOnboarding,
     concerns, createTodo, deleteConcern, deleteSource, deleteTodo, error, exportBackup,
     importBackup, loading, messages, news, notice, refreshNews, saveMessage, saveSettings,
-    saveSource, sessions, settings, sources, todos, updateConcern, updateTodo,
+    reload, saveSource, sessions, settings, sources, todos, updateConcern, updateTodo,
   ])
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
