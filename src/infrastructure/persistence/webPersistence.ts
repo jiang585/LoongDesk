@@ -62,6 +62,12 @@ export class WebPersistence implements Persistence {
   }
 
   async listConcerns() { return structuredClone(this.state.concerns) }
+  async insertConcernIfAbsent(concern: Concern) {
+    const existing = this.state.concerns.find((item) => item.contentHash === concern.contentHash) ?? null
+    if (existing) return { inserted: false, existing: structuredClone(existing) }
+    this.upsert(this.state.concerns, concern)
+    return { inserted: true, existing: null }
+  }
   async saveConcern(concern: Concern) { this.upsert(this.state.concerns, concern) }
   async deleteConcern(id: string) {
     this.state.concerns = this.state.concerns.filter((item) => item.id !== id)
@@ -105,9 +111,14 @@ export class WebPersistence implements Persistence {
   }
 
   async importBackup(backup: AppBackup) {
+    const seenHashes = new Set<string>()
     this.state = {
       todos: backup.todos,
-      concerns: backup.concerns,
+      concerns: backup.concerns.filter((concern) => {
+        if (seenHashes.has(concern.contentHash)) return false
+        seenHashes.add(concern.contentHash)
+        return true
+      }),
       sources: backup.sources,
       news: backup.news,
       sessions: backup.sessions,
@@ -122,4 +133,3 @@ export class WebPersistence implements Persistence {
     this.flush()
   }
 }
-

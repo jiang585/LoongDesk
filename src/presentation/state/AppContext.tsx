@@ -168,7 +168,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const rawText = text.trim()
     if (!rawText) throw new Error('呈上的内容不能为空')
     const contentHash = await hashText(rawText)
-    const duplicate = concerns.find((item) => item.contentHash === contentHash) ?? null
     const now = nowIso()
     let title = rawText.split(/\r?\n/)[0].slice(0, 56)
     let summary = rawText.replace(/\s+/g, ' ').slice(0, 180)
@@ -185,13 +184,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       tags: [], status: 'active', contentHash, createdAt: now, updatedAt: now,
       lastCheckedAt: sourceType === 'url' ? now : null,
     }
-    if (!duplicate) {
-      await persistenceRef.current!.saveConcern(concern)
+    const result = await persistenceRef.current!.insertConcernIfAbsent(concern)
+    if (result.inserted) {
       setConcerns((values) => [concern, ...values])
       broadcastChange()
     }
-    return { concern, duplicate }
-  }, [broadcastChange, concerns])
+    return { concern, duplicate: result.existing }
+  }, [broadcastChange])
 
   const updateConcern = useCallback(async (concern: Concern) => {
     const next = { ...concern, updatedAt: nowIso() }
@@ -296,15 +295,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [addDefaultSources, saveSettings, settings])
 
   const saveMessage = useCallback(async (message: ChatMessage) => {
-    let session = sessions[0]
+    let session = sessions.find((item) => item.id === message.sessionId)
     if (!session) {
-      session = { id: message.sessionId, title: '御前问答', createdAt: message.createdAt, updatedAt: message.createdAt }
-      await persistenceRef.current!.saveSession(session)
-      setSessions([session])
+      const createdSession: ChatSession = { id: message.sessionId, title: message.sessionId === 'pet-session' ? '小安子随侍' : '御前问答', createdAt: message.createdAt, updatedAt: message.createdAt }
+      session = createdSession
+      await persistenceRef.current!.saveSession(createdSession)
+      setSessions((values) => [createdSession, ...values.filter((item) => item.id !== createdSession.id)])
     } else {
-      session = { ...session, updatedAt: message.createdAt }
-      await persistenceRef.current!.saveSession(session)
-      setSessions((values) => values.map((item) => item.id === session.id ? session : item))
+      const updatedSession: ChatSession = { ...session, updatedAt: message.createdAt }
+      session = updatedSession
+      await persistenceRef.current!.saveSession(updatedSession)
+      setSessions((values) => values.map((item) => item.id === updatedSession.id ? updatedSession : item))
     }
     await persistenceRef.current!.saveMessage(message)
     setMessages((values) => [...values.filter((item) => item.id !== message.id), message])

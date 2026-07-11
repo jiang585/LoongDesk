@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { DEFAULT_SETTINGS, type Todo } from '../../domain/models'
+import { DEFAULT_SETTINGS, type Concern, type Todo } from '../../domain/models'
 import { WebPersistence } from './webPersistence'
 
 describe('WebPersistence', () => {
@@ -30,5 +30,20 @@ describe('WebPersistence', () => {
     await persistence.importBackup(backup)
     expect((await persistence.getSettings()).onboardingComplete).toBe(true)
   })
-})
 
+  it('atomically rejects a second concern with the same content hash', async () => {
+    const persistence = new WebPersistence()
+    await persistence.init()
+    const first: Concern = {
+      id: 'concern-1', title: '同一卷宗', rawText: '# 同一卷宗', summary: '', sourceType: 'file',
+      sourceUrl: null, tags: [], status: 'active', contentHash: 'same-hash',
+      createdAt: '2026-01-01', updatedAt: '2026-01-01', lastCheckedAt: null,
+    }
+    const second = { ...first, id: 'concern-2' }
+    await expect(persistence.insertConcernIfAbsent(first)).resolves.toEqual({ inserted: true, existing: null })
+    const duplicate = await persistence.insertConcernIfAbsent(second)
+    expect(duplicate.inserted).toBe(false)
+    expect(duplicate.existing?.id).toBe(first.id)
+    await expect(persistence.listConcerns()).resolves.toHaveLength(1)
+  })
+})

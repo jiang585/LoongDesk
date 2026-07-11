@@ -1,18 +1,19 @@
 import { Bot, Check, ChevronDown, CircleStop, Feather, KeyRound, Send, Sparkles, WandSparkles } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { contextPreview, newId, nowIso } from '../../application/services'
 import type { AiProposal, ChatMessage } from '../../domain/models'
 import type { AssistantRequest } from '../../domain/ports'
 import xiaoAnzi from '../../assets/generated/xiao-anzi-v2.png'
 import { useApp } from '../state/AppContext'
 import { Modal } from '../components/Modal'
+import { useChatAutoScroll } from '../hooks/useChatAutoScroll'
 
 type ContextKind = 'concerns' | 'todos' | 'news'
 
 export function AssistantPage() {
   const {
     assistant, secretStore, settings, saveSettings, todos, concerns, news,
-    sessions, messages, saveMessage, applyProposal, setNotice,
+    messages, saveMessage, applyProposal, setNotice,
   } = useApp()
   const [input, setInput] = useState('')
   const [contextKind, setContextKind] = useState<ContextKind>('concerns')
@@ -20,21 +21,9 @@ export function AssistantPage() {
   const [busy, setBusy] = useState(false)
   const [proposal, setProposal] = useState<AiProposal | null>(null)
   const requestRef = useRef<string | null>(null)
-  const messagesRef = useRef<HTMLDivElement>(null)
-  const [following, setFollowing] = useState(true)
-  const sessionId = sessions[0]?.id ?? 'main-session'
+  const sessionId = 'main-session'
   const sessionMessages = messages.filter((message) => message.sessionId === sessionId)
-
-  const scrollToLatest = () => {
-    const element = messagesRef.current
-    if (!element) return
-    element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
-    setFollowing(true)
-  }
-
-  useEffect(() => {
-    if (following) scrollToLatest()
-  }, [following, sessionMessages.length, streaming])
+  const { containerRef: messagesRef, endRef, following, handleScroll, scrollToLatest } = useChatAutoScroll(`${sessionMessages.length}:${streaming.length}`)
 
   const context = useMemo(() => {
     if (contextKind === 'todos') return contextPreview(todos.filter((item) => item.status === 'pending'), (item) => JSON.stringify(item))
@@ -70,6 +59,7 @@ export function AssistantPage() {
     const createdAt = nowIso()
     const userMessage: ChatMessage = { id: newId(), sessionId, role: 'user', content: text, createdAt }
     await saveMessage(userMessage)
+    scrollToLatest('auto')
     try {
       const request = await buildRequest(text)
       let answer = ''
@@ -104,15 +94,13 @@ export function AssistantPage() {
         <button className="secondary-button full-button" disabled={busy} onClick={() => void organize()}><WandSparkles size={16} /> 整理关心库</button>
       </aside>
       <section className="paper-panel chat-panel">
-        <div className="chat-messages" ref={messagesRef} onScroll={(event) => {
-          const element = event.currentTarget
-          setFollowing(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-        }}>
+        <div className="chat-messages" ref={messagesRef} onScroll={handleScroll}>
           {!sessionMessages.length && !streaming && <div className="chat-welcome"><span><Bot size={24} /></span><h2>陛下今日想问何事？</h2><p>试试：“把本次关心库归成三类”或“从今日奏报中找出与我相关的事”。</p><div><button onClick={() => setInput('概括本次随奏中最值得关注的三件事')}>概括三件要事</button><button onClick={() => setInput('把当前事项按轻重缓急排列')}>排列轻重缓急</button></div></div>}
           {sessionMessages.map((message) => <div className={`message ${message.role}`} key={message.id}>{message.role === 'assistant' && <span className="message-avatar"><Bot size={15} /></span>}<div><small>{message.role === 'assistant' ? '小安子' : '陛下'}</small><p>{message.content}</p></div></div>)}
           {streaming && <div className="message assistant"><span className="message-avatar"><Bot size={15} /></span><div><small>小安子</small><p>{streaming}<i className="typing-caret" /></p></div></div>}
+          <div ref={endRef} className="chat-end-anchor" aria-hidden />
         </div>
-        {!following && <button className="new-message-button" onClick={scrollToLatest}>回到底部查看新消息</button>}
+        {!following && <button className="new-message-button" onClick={() => scrollToLatest()}>回到底部查看新消息</button>}
         <div className="chat-compose">
           <div className="context-disclosure"><KeyRound size={13} /> 将发送当前“{contextKind === 'concerns' ? '关心库' : contextKind === 'todos' ? '待批奏折' : '今日奏报'}”可见上下文 {context.items.length} 条</div>
           <div className="compose-row"><textarea rows={2} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder="向小安子下旨…" />{busy ? <button className="stop-button" aria-label="停止生成" onClick={() => { if (requestRef.current) void assistant.cancel(requestRef.current) }}><CircleStop /></button> : <button className="send-button" disabled={!input.trim()} onClick={() => void send()} aria-label="发送"><Send size={18} /></button>}</div>

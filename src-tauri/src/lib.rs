@@ -14,7 +14,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{ipc::Channel, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{ipc::Channel, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use url::Url;
 
@@ -465,12 +465,21 @@ fn migrations() -> Vec<Migration> {
       );
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
     "#,
+    }, Migration {
+        version: 2,
+        description: "deduplicate_concerns_and_enforce_hash_uniqueness",
+        kind: MigrationKind::Up,
+        sql: r#"
+          DELETE FROM concerns
+          WHERE rowid NOT IN (SELECT MIN(rowid) FROM concerns GROUP BY content_hash);
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_unique_hash ON concerns(content_hash);
+        "#,
     }]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(CancellationRegistry::default())
         .plugin(
             tauri_plugin_sql::Builder::default()
@@ -516,8 +525,19 @@ pub fn run() {
             deepseek_json,
             read_dropped_text,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running 御案");
+        .build(tauri::generate_context!())
+        .expect("error while building 御案");
+
+    app.run(|app_handle, event| {
+        if let RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { .. }, .. } = event {
+            if label == "main" {
+                if let Some(pet) = app_handle.get_webview_window("pet") {
+                    let _ = pet.destroy();
+                }
+                app_handle.exit(0);
+            }
+        }
+    });
 }
 
 #[cfg(test)]

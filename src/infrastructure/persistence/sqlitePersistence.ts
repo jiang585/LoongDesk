@@ -18,6 +18,15 @@ const json = <T>(value: string | null, fallback: T): T => {
   try { return JSON.parse(value) as T } catch { return fallback }
 }
 
+const concernFromRow = (row: Row): Concern => ({
+  id: String(row.id), title: String(row.title), rawText: String(row.raw_text),
+  summary: String(row.summary ?? ''), sourceType: row.source_type as Concern['sourceType'],
+  sourceUrl: row.source_url as string | null, tags: json(String(row.tags_json ?? '[]'), []),
+  status: row.status as Concern['status'], contentHash: String(row.content_hash),
+  createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+  lastCheckedAt: row.last_checked_at as string | null,
+})
+
 export class SqlitePersistence implements Persistence {
   private db!: Database
 
@@ -47,14 +56,19 @@ export class SqlitePersistence implements Persistence {
 
   async listConcerns(): Promise<Concern[]> {
     const rows = await this.db.select<Row[]>('SELECT * FROM concerns ORDER BY updated_at DESC')
-    return rows.map((row) => ({
-      id: String(row.id), title: String(row.title), rawText: String(row.raw_text),
-      summary: String(row.summary ?? ''), sourceType: row.source_type as Concern['sourceType'],
-      sourceUrl: row.source_url as string | null, tags: json(String(row.tags_json ?? '[]'), []),
-      status: row.status as Concern['status'], contentHash: String(row.content_hash),
-      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
-      lastCheckedAt: row.last_checked_at as string | null,
-    }))
+    return rows.map(concernFromRow)
+  }
+  async insertConcernIfAbsent(concern: Concern) {
+    const result = await this.db.execute(
+      `INSERT OR IGNORE INTO concerns (id,title,raw_text,summary,source_type,source_url,tags_json,status,content_hash,created_at,updated_at,last_checked_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [concern.id, concern.title, concern.rawText, concern.summary, concern.sourceType,
+        concern.sourceUrl, JSON.stringify(concern.tags), concern.status, concern.contentHash,
+        concern.createdAt, concern.updatedAt, concern.lastCheckedAt],
+    )
+    if (result.rowsAffected > 0) return { inserted: true, existing: null }
+    const rows = await this.db.select<Row[]>('SELECT * FROM concerns WHERE content_hash=$1 LIMIT 1', [concern.contentHash])
+    return { inserted: false, existing: rows[0] ? concernFromRow(rows[0]) : null }
   }
   async saveConcern(concern: Concern) {
     await this.db.execute(
@@ -153,7 +167,7 @@ export class SqlitePersistence implements Persistence {
     try {
       await this.clearAll(false)
       for (const value of backup.todos) await this.saveTodo(value)
-      for (const value of backup.concerns) await this.saveConcern(value)
+      for (const value of backup.concerns) await this.insertConcernIfAbsent(value)
       for (const value of backup.sources) await this.saveSource(value)
       await this.saveNews(backup.news)
       for (const value of backup.sessions) await this.saveSession(value)
@@ -179,4 +193,3 @@ export class SqlitePersistence implements Persistence {
     }
   }
 }
-

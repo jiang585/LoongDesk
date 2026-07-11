@@ -1,5 +1,5 @@
 import { Archive, ClipboardPaste, Edit3, FileText, Globe2, LibraryBig, Plus, Search, Sparkles, Trash2, UploadCloud } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { Concern, ConcernSourceType } from '../../domain/models'
 import { useApp } from '../state/AppContext'
@@ -41,19 +41,10 @@ export function ConcernsPage() {
     }
   }
 
-  const onDrop = async (event: DragEvent) => {
-    event.preventDefault(); setDragging(false)
-    if (event.dataTransfer.files.length) await readFiles(event.dataTransfer.files)
-    else {
-      const text = event.dataTransfer.getData('text/plain')
-      if (text) await capture(text, 'drop')
-    }
-  }
-
   return (
     <div className="page">
       <header className="page-heading"><div><span className="eyebrow">留心世事</span><h1>关心库</h1><p>把值得持续关注的文字和链接呈到案前。</p></div><button className="primary-button" onClick={() => setEditor('new')}><Plus size={17} /> 手工呈上</button></header>
-      <section className={`capture-zone ${dragging ? 'dragging' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false) }} onDrop={(event) => void onDrop(event)}>
+      <section className={`capture-zone ${dragging ? 'dragging' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false) }} onDrop={() => setDragging(false)}>
         <span className="capture-icon"><UploadCloud size={25} /></span>
         <div><strong>{dragging ? '松手即可呈上' : '拖入文字或卷宗'}</strong><p>支持网页选中文字，以及不超过 1MB 的 .txt / .md 文件</p></div>
         <div className="capture-actions">
@@ -103,4 +94,3 @@ function ConcernEditor({ concern, onClose, onSave }: { concern: Concern | null; 
     </form>
   </Modal>
 }
-

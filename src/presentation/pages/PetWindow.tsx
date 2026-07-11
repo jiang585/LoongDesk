@@ -1,5 +1,5 @@
 import { ClipboardPaste, LibraryBig, MessageCircle, Minus, Send, Sparkles, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { emitTo, listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
@@ -9,6 +9,7 @@ import { isTauri } from '../../infrastructure/platform'
 import xiaoAnzi from '../../assets/generated/xiao-anzi-v2.png'
 import { DropCapture } from '../components/DropCapture'
 import { useApp } from '../state/AppContext'
+import { useChatAutoScroll } from '../hooks/useChatAutoScroll'
 
 export function PetWindow() {
   const { assistant, secretStore, settings, sessions, messages, saveMessage, captureConcern, createTodo, setNotice } = useApp()
@@ -18,8 +19,11 @@ export function PetWindow() {
   const [busy, setBusy] = useState(false)
   const requestId = useRef<string | null>(null)
   const answerRef = useRef('')
+  const dragGesture = useRef<{ pointerId: number; x: number; y: number; dragging: boolean } | null>(null)
+  const suppressClick = useRef(false)
   const sessionId = sessions.find((session) => session.id === 'pet-session')?.id ?? 'pet-session'
   const history = messages.filter((message) => message.sessionId === sessionId)
+  const { containerRef: chatRef, endRef: chatEndRef, handleScroll: handleChatScroll, scrollToLatest: scrollChatToLatest } = useChatAutoScroll(`${history.length}:${streaming.length}:${expanded}`)
 
   useEffect(() => {
     document.documentElement.classList.add('pet-mode')
@@ -88,6 +92,7 @@ export function PetWindow() {
     setInput(''); setBusy(true); setStreaming('')
     const userMessage: ChatMessage = { id: newId(), sessionId, role: 'user', content: text, createdAt: nowIso() }
     await saveMessage(userMessage)
+    scrollChatToLatest('auto')
     try {
       if (isTauri()) {
         const id = newId(); requestId.current = id; answerRef.current = ''
@@ -132,23 +137,51 @@ export function PetWindow() {
     if (isTauri()) await emitTo('main', 'yuan://open-route', route)
   }
 
+  const beginCharacterGesture = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    dragGesture.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, dragging: false }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const moveCharacterGesture = (event: PointerEvent<HTMLDivElement>) => {
+    const gesture = dragGesture.current
+    if (!gesture || gesture.pointerId !== event.pointerId || gesture.dragging) return
+    if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 5) return
+    gesture.dragging = true
+    suppressClick.current = true
+    if (isTauri()) {
+      void getCurrentWindow().startDragging().finally(() => {
+        dragGesture.current = null
+        window.setTimeout(() => { suppressClick.current = false }, 80)
+      })
+    }
+  }
+
+  const endCharacterGesture = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragGesture.current?.pointerId === event.pointerId && !dragGesture.current.dragging) dragGesture.current = null
+  }
+
+  const toggleExpanded = () => {
+    if (!suppressClick.current) setExpanded((value) => !value)
+  }
+
   return <DropCapture compact>
     <div className={`pet-window ${expanded ? 'expanded' : ''}`}>
-      <button className="pet-drag-handle" data-tauri-drag-region aria-label="拖动小安子" />
-      <div className="pet-character" onClick={() => setExpanded((value) => !value)} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && setExpanded((value) => !value)}>
-        <img src={xiaoAnzi} alt="Q版小安子，点击交谈" />
+      <div className="pet-character" onPointerDown={beginCharacterGesture} onPointerMove={moveCharacterGesture} onPointerUp={endCharacterGesture} onPointerCancel={endCharacterGesture} onClick={toggleExpanded} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && toggleExpanded()} aria-label="点击交谈，按住拖动小安子">
+        <img src={xiaoAnzi} alt="Q版小安子，点击交谈" draggable={false} />
         <span className={busy ? 'thinking' : ''}>{busy ? '思量中' : '小安子'}</span>
       </div>
       {expanded && <section className="pet-bubble">
-        <header><div><Sparkles size={15} /><strong>候旨中</strong></div><button onClick={() => setExpanded(false)} aria-label="收起"><Minus size={16} /></button></header>
+        <header><div className="pet-bubble-drag" data-tauri-drag-region><Sparkles size={15} /><strong>候旨中</strong><span>拖动</span></div><button onClick={() => setExpanded(false)} aria-label="收起"><Minus size={16} /></button></header>
         <div className="pet-quick-actions">
           <button onClick={() => void paste()}><ClipboardPaste size={14} /> 收下剪贴板</button>
           <button onClick={() => void openDesk('/concerns')}><LibraryBig size={14} /> 关心库</button>
           <button onClick={() => void openDesk('/assistant')}><MessageCircle size={14} /> 完整对话</button>
         </div>
-        <div className="pet-chat-history">
+        <div className="pet-chat-history" ref={chatRef} onScroll={handleChatScroll}>
           {history.slice(-3).map((message) => <p key={message.id} className={message.role}><b>{message.role === 'assistant' ? '小安子' : '陛下'}：</b>{message.content}</p>)}
           {streaming && <p className="assistant"><b>小安子：</b>{streaming}</p>}
+          <div ref={chatEndRef} className="chat-end-anchor" aria-hidden />
         </div>
         <div className="pet-compose"><input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void send() }} placeholder="向小安子吩咐…" /><button disabled={!input.trim() || busy} onClick={() => void send()} aria-label="发送"><Send size={16} /></button></div>
         <button className="pet-todo" onClick={() => { const title = input.trim(); if (title) { void createTodo({ title }); setInput(''); setNotice('已记为待办') } }}>将输入记为待办</button>

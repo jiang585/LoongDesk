@@ -18,6 +18,7 @@ export interface TodoRepository {
 
 export interface ConcernRepository {
   listConcerns(): Promise<Concern[]>
+  insertConcernIfAbsent(concern: Concern): Promise<{ inserted: boolean; existing: Concern | null }>
   saveConcern(concern: Concern): Promise<void>
   deleteConcern(id: string): Promise<void>
 }
@@ -105,4 +106,3 @@ export interface SecretStore {
 export interface Clock {
   now(): Date
 }
-
