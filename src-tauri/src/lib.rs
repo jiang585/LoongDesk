@@ -539,6 +539,11 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(CancellationRegistry::default())
         .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Warn)
+                .build(),
+        )
+        .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(desktop::handle_shortcut)
                 .build(),
@@ -555,13 +560,6 @@ pub fn run() {
             let salt_path = app.path().app_local_data_dir()?.join("stronghold-salt.txt");
             app.handle()
                 .plugin(tauri_plugin_stronghold::Builder::with_argon2(&salt_path).build())?;
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Warn)
-                        .build(),
-                )?;
-            }
             let mut pet_builder =
                 WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html#/pet".into()))
                     .title("小安子")
@@ -572,14 +570,22 @@ pub fn run() {
                     .always_on_top(true)
                     .skip_taskbar(true)
                     .resizable(false);
-            if let Some(monitor) = app.primary_monitor()? {
-                let scale = monitor.scale_factor();
-                let work = monitor.work_area();
-                let x = (work.position.x as f64 + work.size.width as f64 - 250.0 * scale) / scale;
-                let y = (work.position.y as f64 + work.size.height as f64 - 350.0 * scale) / scale;
-                pet_builder = pet_builder.position(x.max(0.0), y.max(0.0));
+            match app.primary_monitor() {
+                Ok(Some(monitor)) => {
+                    let scale = monitor.scale_factor();
+                    let work = monitor.work_area();
+                    let x =
+                        (work.position.x as f64 + work.size.width as f64 - 250.0 * scale) / scale;
+                    let y =
+                        (work.position.y as f64 + work.size.height as f64 - 350.0 * scale) / scale;
+                    pet_builder = pet_builder.position(x.max(0.0), y.max(0.0));
+                }
+                Ok(None) => log::warn!("未检测到主显示器，小安子将使用默认位置"),
+                Err(error) => log::warn!("读取主显示器失败，小安子将使用默认位置：{error}"),
             }
-            pet_builder.build()?;
+            if let Err(error) = pet_builder.build() {
+                log::warn!("小安子窗口初始化失败，主窗口仍可正常使用：{error}");
+            }
             desktop::setup(app)?;
             Ok(())
         })
@@ -594,8 +600,16 @@ pub fn run() {
             desktop::set_background_resident,
             desktop::set_shortcuts_enabled,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while building 御案");
+        .build(tauri::generate_context!());
+
+    let app = match app {
+        Ok(app) => app,
+        Err(error) => {
+            log::error!("御案启动初始化失败：{error}");
+            eprintln!("御案启动初始化失败：{error}");
+            return;
+        }
+    };
 
     app.run(|app_handle, event| {
         if let RunEvent::WindowEvent { label, event, .. } = event {

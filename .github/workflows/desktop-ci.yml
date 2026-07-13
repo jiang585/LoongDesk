@@ -51,13 +51,16 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
+      - name: Build unpackaged desktop application
+        run: npm run tauri build -- --debug --no-bundle
+      - name: Verify desktop process survives startup
+        shell: pwsh
+        run: npm run test:startup:windows
       - name: Install Tauri WebDriver dependencies
         shell: pwsh
         run: |
           cargo install tauri-driver --locked
           choco install selenium-edge-driver --yes --no-progress
-      - name: Build unpackaged desktop application
-        run: npm run tauri build -- --debug --no-bundle
       - name: Start Tauri WebDriver
         id: driver
         shell: pwsh

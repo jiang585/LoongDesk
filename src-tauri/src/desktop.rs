@@ -273,7 +273,16 @@ fn quit<R: Runtime>(app: &AppHandle<R>) {
 }
 
 pub fn setup(app: &mut App) -> tauri::Result<()> {
-    let path = app.path().app_local_data_dir()?.join("desktop-state.json");
+    let path = app
+        .path()
+        .app_local_data_dir()
+        .map(|path| path.join("desktop-state.json"))
+        .unwrap_or_else(|error| {
+            log::warn!("无法确定应用数据目录，窗口状态将保存到临时目录：{error}");
+            std::env::temp_dir()
+                .join("com.loongdesk.yuan")
+                .join("desktop-state.json")
+        });
     app.manage(DesktopState::load(path));
 
     let stored = app
@@ -290,6 +299,30 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
         restore_window(&pet, stored.get("pet").cloned(), (230, 320), true);
     }
 
+    if let Err(error) = setup_tray(app) {
+        log::warn!("系统托盘初始化失败，主窗口仍可正常使用：{error}");
+    }
+
+    let prefs = app.state::<DesktopState>().preferences();
+    if prefs.shortcuts_enabled {
+        let shortcut_result = app
+            .global_shortcut()
+            .register(PET_SHORTCUT)
+            .and_then(|_| app.global_shortcut().register(TODO_SHORTCUT));
+        if let Err(error) = shortcut_result {
+            let _ = app.global_shortcut().unregister_all();
+            let state = app.state::<DesktopState>();
+            if let Ok(mut value) = state.value.lock() {
+                value.preferences.shortcuts_enabled = false;
+            }
+            let _ = state.save();
+            log::warn!("全局快捷键注册失败，应用将继续启动：{error}");
+        }
+    }
+    Ok(())
+}
+
+fn setup_tray(app: &mut App) -> tauri::Result<()> {
     let show_main = MenuItem::with_id(app, "show-main", "打开御案", true, None::<&str>)?;
     let show_pet = MenuItem::with_id(app, "show-pet", "唤起小安子", true, None::<&str>)?;
     let background = CheckMenuItem::with_id(
@@ -320,12 +353,13 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     if let Ok(mut item) = app.state::<DesktopState>().background_item.lock() {
         *item = Some(background.clone());
     }
-    TrayIconBuilder::with_id("yuan-tray")
-        .icon(
-            app.default_window_icon()
-                .cloned()
-                .expect("应用图标必须存在"),
-        )
+    let mut tray_builder = TrayIconBuilder::with_id("yuan-tray");
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray_builder = tray_builder.icon(icon);
+    } else {
+        log::warn!("未找到默认应用图标，托盘将使用系统默认图标");
+    }
+    tray_builder
         .tooltip("御案")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -360,23 +394,6 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
             }
         })
         .build(app)?;
-
-    let prefs = app.state::<DesktopState>().preferences();
-    if prefs.shortcuts_enabled {
-        let shortcut_result = app
-            .global_shortcut()
-            .register(PET_SHORTCUT)
-            .and_then(|_| app.global_shortcut().register(TODO_SHORTCUT));
-        if let Err(error) = shortcut_result {
-            let _ = app.global_shortcut().unregister_all();
-            let state = app.state::<DesktopState>();
-            if let Ok(mut value) = state.value.lock() {
-                value.preferences.shortcuts_enabled = false;
-            }
-            let _ = state.save();
-            log::warn!("全局快捷键注册失败，应用将继续启动：{error}");
-        }
-    }
     Ok(())
 }
 

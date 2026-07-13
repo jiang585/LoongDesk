@@ -4,7 +4,7 @@
   <p>像批阅奏折一样，管理待办、关心之事与今日奏报。</p>
 
   <p>
-    <a href="./package.json"><img src="https://img.shields.io/badge/version-0.3.0-9c3b2d" alt="Version 0.3.0" /></a>
+    <a href="./package.json"><img src="https://img.shields.io/badge/version-0.3.1-9c3b2d" alt="Version 0.3.1" /></a>
     <a href="https://v2.tauri.app/"><img src="https://img.shields.io/badge/Tauri-2-24c8db?logo=tauri&amp;logoColor=white" alt="Tauri 2" /></a>
     <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-6-3178c6?logo=typescript&amp;logoColor=white" alt="TypeScript 6" /></a>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-b3945d" alt="MIT License" /></a>

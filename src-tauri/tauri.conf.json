@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "御案",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "identifier": "com.loongdesk.yuan",
   "build": {
     "frontendDist": "../dist",
@@ -25,6 +25,15 @@
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {

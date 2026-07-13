@@ -80,3 +80,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --config src-tauri/tauri.release.conf.json
+
+      - name: Verify signed release process survives startup
+        shell: pwsh
+        run: ./scripts/windows-startup-smoke.ps1 -Executable src-tauri/target/release/yuan.exe

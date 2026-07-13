@@ -1,6 +1,6 @@
 [package]
 name = "yuan"
-version = "0.3.0"
+version = "0.3.1"
 description = "御案——本地优先的新中式桌面效率工具"
 authors = ["Yuan Contributors"]
 license = "MIT"
