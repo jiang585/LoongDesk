@@ -12,6 +12,9 @@
     "sql:default",
     "sql:allow-execute",
     "opener:default",
-    "stronghold:default"
+    "stronghold:default",
+    "global-shortcut:default",
+    "updater:default",
+    "process:default"
   ]
 }

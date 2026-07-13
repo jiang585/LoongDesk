@@ -2,7 +2,6 @@ import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-d
 import { useEffect, useMemo } from 'react'
 import { emitTo, listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { LogicalPosition } from '@tauri-apps/api/dpi'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { AppProvider } from './presentation/state/AppContext'
 import { AppShell } from './presentation/components/AppShell'
@@ -47,11 +46,10 @@ function MainDesk() {
       const pet = await WebviewWindow.getByLabel('pet')
       if (!pet) return
       await pet.setAlwaysOnTop(settings.petAlwaysOnTop)
-      if (settings.petBounds) await pet.setPosition(new LogicalPosition(settings.petBounds.x, settings.petBounds.y))
       if (settings.petEnabled) await pet.show()
       else await pet.hide()
     })()
-  }, [settings.petAlwaysOnTop, settings.petBounds, settings.petEnabled])
+  }, [settings.petAlwaysOnTop, settings.petEnabled])
 
   useEffect(() => {
     if (!isTauri()) return

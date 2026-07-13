@@ -2,6 +2,7 @@ import {
   DEFAULT_SETTINGS,
   type AppBackup,
   type AppSettings,
+  type AiProposalHistory,
   type ChatMessage,
   type ChatSession,
   type Concern,
@@ -22,6 +23,7 @@ const emptyState = (): State => ({
   news: [],
   sessions: [],
   messages: [],
+  proposalHistory: [],
   settings: DEFAULT_SETTINGS,
 })
 
@@ -92,6 +94,11 @@ export class WebPersistence implements Persistence {
 
   async listSessions() { return structuredClone(this.state.sessions) }
   async saveSession(session: ChatSession) { this.upsert(this.state.sessions, session) }
+  async deleteSession(id: string) {
+    this.state.sessions = this.state.sessions.filter((item) => item.id !== id)
+    this.state.messages = this.state.messages.filter((item) => item.sessionId !== id)
+    this.flush()
+  }
   async listMessages(sessionId?: string) {
     const values = sessionId
       ? this.state.messages.filter((message) => message.sessionId === sessionId)
@@ -99,6 +106,50 @@ export class WebPersistence implements Persistence {
     return structuredClone(values)
   }
   async saveMessage(message: ChatMessage) { this.upsert(this.state.messages, message) }
+
+  async listProposalHistory() { return structuredClone(this.state.proposalHistory) }
+  async applyProposalTransaction(history: AiProposalHistory) {
+    for (const change of history.concernChanges) {
+      const index = this.state.concerns.findIndex((item) => item.id === change.after.id)
+      if (index >= 0) this.state.concerns[index] = change.after
+    }
+    for (const todo of history.createdTodos) {
+      const index = this.state.todos.findIndex((item) => item.id === todo.id)
+      if (index >= 0) this.state.todos[index] = todo
+      else this.state.todos.unshift(todo)
+    }
+    this.state.proposalHistory.unshift(history)
+    this.flush()
+  }
+  async undoProposalTransaction(id: string) {
+    const history = this.state.proposalHistory.find((item) => item.id === id)
+    if (!history || history.undoneAt) throw new Error('这次朱批不存在或已经撤销')
+    const latest = this.state.proposalHistory
+      .filter((item) => !item.undoneAt)
+      .sort((a, b) => b.appliedAt.localeCompare(a.appliedAt))[0]
+    if (!latest || latest.id !== id) throw new Error('只能撤销最近一次尚未撤销的朱批')
+    for (const change of history.concernChanges) {
+      const current = this.state.concerns.find((item) => item.id === change.after.id)
+      if (!current || JSON.stringify(current) !== JSON.stringify(change.after)) {
+        throw new Error(`关心项“${change.after.title}”在朱批后已被修改，已停止撤销以保护新内容`)
+      }
+    }
+    for (const created of history.createdTodos) {
+      const current = this.state.todos.find((item) => item.id === created.id)
+      if (!current || JSON.stringify(current) !== JSON.stringify(created)) {
+        throw new Error(`待办“${created.title}”在朱批后已被修改，已停止撤销以保护新内容`)
+      }
+    }
+    for (const change of history.concernChanges) {
+      const index = this.state.concerns.findIndex((item) => item.id === change.before.id)
+      if (index >= 0) this.state.concerns[index] = change.before
+    }
+    const todoIds = new Set(history.createdTodos.map((item) => item.id))
+    this.state.todos = this.state.todos.filter((item) => !todoIds.has(item.id))
+    history.undoneAt = new Date().toISOString()
+    this.flush()
+    return structuredClone(history)
+  }
 
   async getSettings() { return structuredClone(this.state.settings) }
   async saveSettings(settings: AppSettings) {
@@ -123,6 +174,7 @@ export class WebPersistence implements Persistence {
       news: backup.news,
       sessions: backup.sessions,
       messages: backup.messages,
+      proposalHistory: backup.proposalHistory,
       settings: { ...DEFAULT_SETTINGS, ...backup.settings },
     }
     this.flush()
@@ -131,5 +183,17 @@ export class WebPersistence implements Persistence {
   async clearAll() {
     this.state = emptyState()
     this.flush()
+  }
+
+  async getDatabaseDiagnostics() {
+    return {
+      engine: 'localStorage' as const,
+      status: 'healthy' as const,
+      schemaVersion: 1,
+      appliedMigrations: 1,
+      integrityMessage: 'ok',
+      foreignKeyIssues: 0,
+      checkedAt: new Date().toISOString(),
+    }
   }
 }

@@ -5,8 +5,9 @@ import { useApp } from '../state/AppContext'
 import { isTauri } from '../../infrastructure/platform'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { invoke } from '@tauri-apps/api/core'
+import { htmlToSafeText } from '../../application/concernTools'
 
-const MAX_CAPTURE_BYTES = 1_048_576
+const MAX_CAPTURE_BYTES = 10 * 1_048_576
 
 function dropText(event: globalThis.DragEvent) {
   const plain = event.dataTransfer?.getData('text/plain').trim()
@@ -15,7 +16,7 @@ function dropText(event: globalThis.DragEvent) {
   if (uri) return uri
   const html = event.dataTransfer?.getData('text/html')
   if (!html) return ''
-  return new DOMParser().parseFromString(html, 'text/html').body.textContent?.trim() ?? ''
+  return htmlToSafeText(html)
 }
 
 /** Window-wide, user-initiated drop intake shared by the main desk and Xiao Anzi. */
@@ -27,7 +28,7 @@ export function DropCapture({ children, compact = false }: { children: ReactNode
   const capture = useCallback(async (text: string, sourceType: ConcernSourceType) => {
     if (!text.trim()) return
     if (new Blob([text]).size > MAX_CAPTURE_BYTES) {
-      setNotice('这份内容超过 1MB，未收录')
+      setNotice('这份内容超过 10MB，未收录')
       return
     }
     try {
@@ -40,15 +41,17 @@ export function DropCapture({ children, compact = false }: { children: ReactNode
 
   const captureFiles = useCallback(async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
-      if (!/\.(txt|md|markdown)$/i.test(file.name)) {
-        setNotice('小安子只接收 .txt 或 .md 文本文件')
+      if (!/\.(txt|md|markdown|html?|xhtml)$/i.test(file.name)) {
+        setNotice('浏览器预览支持 TXT、Markdown、HTML；桌面端拖入还支持 PDF')
         continue
       }
       if (file.size > MAX_CAPTURE_BYTES) {
-        setNotice(`${file.name} 超过 1MB，未收录`)
+        setNotice(`${file.name} 超过 10MB，未收录`)
         continue
       }
-      await capture(await file.text(), 'file')
+      const raw = await file.text()
+      const text = /\.html?$/i.test(file.name) ? htmlToSafeText(raw) : raw
+      await capture(text, 'file')
     }
   }, [capture, setNotice])
 

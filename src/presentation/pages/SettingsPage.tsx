@@ -1,18 +1,59 @@
-import { AlertTriangle, Check, Database, Download, Eye, EyeOff, KeyRound, LockKeyhole, MonitorUp, RefreshCw, ShieldCheck, Trash2, Upload } from 'lucide-react'
-import { useRef, useState } from 'react'
-import type { AppBackup } from '../../domain/models'
-import { backupSchema } from '../../domain/schemas'
+import { AlertTriangle, Check, CloudDownload, Database, Download, Eye, EyeOff, KeyRound, LockKeyhole, MonitorUp, RefreshCw, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { BackupInspection, DatabaseDiagnostics } from '../../domain/models'
+import { inspectBackup } from '../../application/backupInspection'
 import { isTauri } from '../../infrastructure/platform'
+import { desktopManager, type DesktopPreferences } from '../../infrastructure/desktopManager'
 import { useApp } from '../state/AppContext'
+import { Modal } from '../components/Modal'
 
 export function SettingsPage() {
-  const { settings, saveSettings, secretStore, exportBackup, importBackup, clearAllData, setNotice } = useApp()
+  const { settings, saveSettings, secretStore, exportBackup, importBackup, getDatabaseDiagnostics, clearAllData, setNotice } = useApp()
   const [password, setPassword] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [vaultStatus, setVaultStatus] = useState<'locked' | 'unlocked'>('locked')
   const [busy, setBusy] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
+  const [backupPreview, setBackupPreview] = useState<BackupInspection | null>(null)
+  const [diagnostics, setDiagnostics] = useState<DatabaseDiagnostics | null>(null)
+  const [desktopPreferences, setDesktopPreferences] = useState<DesktopPreferences>({ backgroundResident: false, shortcutsEnabled: false })
+  const [updateBusy, setUpdateBusy] = useState(false)
+
+  const runDiagnostics = useCallback(async () => setDiagnostics(await getDatabaseDiagnostics()), [getDatabaseDiagnostics])
+  useEffect(() => { void runDiagnostics() }, [runDiagnostics])
+  useEffect(() => {
+    if (!isTauri()) return
+    void desktopManager.preferences()
+      .then(setDesktopPreferences)
+      .catch((cause) => setNotice(cause instanceof Error ? cause.message : '无法读取桌面设置'))
+  }, [setNotice])
+
+  const updateDesktopPreference = async (key: keyof DesktopPreferences, enabled: boolean) => {
+    try {
+      if (key === 'backgroundResident') await desktopManager.setBackgroundResident(enabled)
+      else await desktopManager.setShortcutsEnabled(enabled)
+      setDesktopPreferences((current) => ({ ...current, [key]: enabled }))
+      setNotice(key === 'backgroundResident' ? (enabled ? '关闭主窗后将驻留系统托盘' : '关闭主窗将完全退出御案') : (enabled ? '全局快捷键已启用' : '全局快捷键已停用'))
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '桌面设置保存失败')
+    }
+  }
+
+  const checkForUpdate = async () => {
+    setUpdateBusy(true)
+    try {
+      const update = await desktopManager.checkForUpdate()
+      if (!update) { setNotice('当前已是最新版本'); return }
+      if (!confirm(`发现御案 ${update.version}，是否下载并安装？`)) return
+      setNotice('正在下载更新，完成后将自动重启…')
+      await desktopManager.installUpdate(update)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '检查更新失败')
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
 
   const unlock = async () => {
     if (!password) return
@@ -52,11 +93,11 @@ export function SettingsPage() {
   const readBackup = async (file: File) => {
     try {
       const raw = JSON.parse(await file.text())
-      backupSchema.parse(raw)
-      await importBackup(raw as AppBackup)
-      setNotice('卷宗恢复完成')
-    } catch {
-      setNotice('这不是有效的御案 v1 备份')
+      setBackupPreview(await inspectBackup(raw))
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '这不是有效的御案 v1 备份')
+    } finally {
+      if (importRef.current) importRef.current.value = ''
     }
   }
 
@@ -81,6 +122,10 @@ export function SettingsPage() {
           <label><span>界面字号</span><select value={settings.fontScale} onChange={(event) => void saveSettings({ ...settings, fontScale: Number(event.target.value) as typeof settings.fontScale })}><option value={1}>标准（16px 正文）</option><option value={1.12}>较大（112%）</option><option value={1.25}>大字（125%）</option></select></label>
           <label><span>小安子</span><select value={settings.petEnabled ? 'show' : 'hide'} onChange={(event) => void saveSettings({ ...settings, petEnabled: event.target.value === 'show' })}><option value="show">显示在桌面</option><option value="hide">暂时隐藏</option></select></label>
           <label><span>窗口层级</span><select value={settings.petAlwaysOnTop ? 'top' : 'normal'} onChange={(event) => void saveSettings({ ...settings, petAlwaysOnTop: event.target.value === 'top' })}><option value="top">始终置顶</option><option value="normal">普通窗口</option></select></label>
+          <label><span>关闭主窗口</span><select disabled={!isTauri()} value={desktopPreferences.backgroundResident ? 'resident' : 'exit'} onChange={(event) => void updateDesktopPreference('backgroundResident', event.target.value === 'resident')}><option value="exit">完全退出御案</option><option value="resident">驻留系统托盘</option></select></label>
+          <label><span>全局快捷键</span><select disabled={!isTauri()} value={desktopPreferences.shortcutsEnabled ? 'enabled' : 'disabled'} onChange={(event) => void updateDesktopPreference('shortcutsEnabled', event.target.value === 'enabled')}><option value="enabled">启用 Ctrl+Shift+Space / T</option><option value="disabled">停用</option></select></label>
+          <button className="secondary-button" disabled={!isTauri() || updateBusy} onClick={() => void checkForUpdate()}><CloudDownload size={16} /> {updateBusy ? '正在检查…' : '检查应用更新'}</button>
+          {!isTauri() && <small className="field-note">浏览器预览不支持托盘、全局快捷键和应用更新。</small>}
         </div>
       </section>
 
@@ -100,6 +145,14 @@ export function SettingsPage() {
           <button className="secondary-button" onClick={() => importRef.current?.click()}><Upload size={16} /> 从备份恢复</button>
           <input ref={importRef} hidden type="file" accept="application/json,.json" onChange={(event) => event.target.files?.[0] && void readBackup(event.target.files[0])} />
           <p className="privacy-note">备份包含待办、关心库、奏报缓存和聊天记录，不包含保险库密码或 API Key。</p>
+          <div className={`database-health ${diagnostics?.status ?? 'checking'}`}>
+            <div><strong>数据库健康检查</strong><span>{diagnostics ? (diagnostics.status === 'healthy' ? '正常' : diagnostics.status === 'warning' ? '需留意' : '异常') : '检查中'}</span></div>
+            {diagnostics && <p>
+              {diagnostics.engine === 'sqlite' ? 'SQLite' : '浏览器存储'} · 架构版本 {diagnostics.schemaVersion ?? '未知'} ·
+              完整性 {diagnostics.integrityMessage} · 外键异常 {diagnostics.foreignKeyIssues}
+            </p>}
+            <button className="ghost-button" onClick={() => void runDiagnostics()}><RefreshCw size={14} /> 重新诊断</button>
+          </div>
         </div>
       </section>
 
@@ -108,6 +161,23 @@ export function SettingsPage() {
         <div className="settings-body"><button className="danger-button" onClick={async () => { if (!confirm('此操作无法撤销。确定清空全部本地卷宗？')) return; await clearAllData(); setNotice('御案已清空') }}><Trash2 size={16} /> 清空全部本地数据</button></div>
       </section>
     </div>
-    <section className="privacy-manifest"><ShieldCheck size={18} /><div><strong>御案不设账户、云同步、广告或遥测。</strong><p>仅在问答、刷新 RSS/网页快照和主动打开原文时访问网络。</p></div></section>
+    <section className="privacy-manifest"><ShieldCheck size={18} /><div><strong>御案不设账户、云同步、广告或遥测。</strong><p>仅在问答、刷新 RSS/网页快照、主动打开原文或手动检查更新时访问网络。</p></div></section>
+    {backupPreview && <Modal title="恢复预览" wide onClose={() => setBackupPreview(null)}>
+      <div className="backup-preview">
+        <p>备份时间：{new Date(backupPreview.backup.exportedAt).toLocaleString('zh-CN')}</p>
+        <p>校验指纹：<code>{backupPreview.fingerprint}</code></p>
+        <div className="backup-counts">
+          <span>待办 <strong>{backupPreview.counts.todos}</strong></span>
+          <span>关心项 <strong>{backupPreview.counts.concerns}</strong></span>
+          <span>奏报 <strong>{backupPreview.counts.news}</strong></span>
+          <span>会话/消息 <strong>{backupPreview.counts.sessions}/{backupPreview.counts.messages}</strong></span>
+          <span>AI 朱批历史 <strong>{backupPreview.counts.proposalHistory}</strong></span>
+          <span>筛选器/规则 <strong>{backupPreview.counts.concernFilters}/{backupPreview.counts.concernRules}</strong></span>
+        </div>
+        {backupPreview.warnings.length > 0 && <div className="backup-warnings"><AlertTriangle size={17} /><div>{backupPreview.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div></div>}
+        <p className="privacy-note">恢复会先通过结构和关联校验，确认后以事务替换当前本地数据。此操作不可撤销，建议先导出现有备份。</p>
+        <footer className="modal-actions"><button className="secondary-button" onClick={() => setBackupPreview(null)}>取消</button><button className="primary-button" onClick={async () => { setBusy(true); try { await importBackup(backupPreview.backup); setBackupPreview(null); setNotice('卷宗恢复完成') } finally { setBusy(false) } }} disabled={busy}>确认恢复</button></footer>
+      </div>
+    </Modal>}
   </div>
 }

@@ -12,6 +12,8 @@ import {
 import {
   DEFAULT_SETTINGS,
   type AiProposal,
+  type AiProposalHistory,
+  type AiProposalSelection,
   type AppBackup,
   type AppSettings,
   type ChatMessage,
@@ -21,6 +23,7 @@ import {
   type ContentSource,
   type NewsItem,
   type Todo,
+  type DatabaseDiagnostics,
 } from '../../domain/models'
 import type { Persistence } from '../../domain/ports'
 import { hashText, matchConcernIds, newId, nowIso } from '../../application/services'
@@ -35,6 +38,10 @@ export const DEFAULT_SOURCES: Array<Pick<ContentSource, 'name' | 'kind' | 'url'>
   { name: '中新网·即时新闻', kind: 'rss', url: 'https://www.chinanews.com.cn/rss/scroll-news.xml' },
   { name: '中新网·财经', kind: 'rss', url: 'https://www.chinanews.com.cn/rss/finance.xml' },
   { name: '中新网·国际', kind: 'rss', url: 'https://www.chinanews.com.cn/rss/world.xml' },
+  { name: '中国日报·国内', kind: 'rss', url: 'https://www.chinadaily.com.cn/rss/china_rss.xml' },
+  { name: 'MIT 科技评论', kind: 'rss', url: 'https://www.technologyreview.com/feed/' },
+  { name: 'NASA 科学探索', kind: 'rss', url: 'https://www.nasa.gov/feed/' },
+  { name: 'Hacker News', kind: 'rss', url: 'https://hnrss.org/frontpage' },
 ]
 
 interface CaptureResult { concern: Concern; duplicate: Concern | null }
@@ -49,6 +56,7 @@ interface AppContextValue {
   news: NewsItem[]
   sessions: ChatSession[]
   messages: ChatMessage[]
+  proposalHistory: AiProposalHistory[]
   settings: AppSettings
   secretStore: LocalSecretStore
   assistant: DeepSeekAssistantProvider
@@ -65,9 +73,13 @@ interface AppContextValue {
   saveSettings(settings: AppSettings): Promise<void>
   completeOnboarding(addSources: boolean): Promise<void>
   saveMessage(message: ChatMessage): Promise<void>
-  applyProposal(proposal: AiProposal): Promise<void>
+  renameSession(id: string, title: string): Promise<void>
+  deleteSession(id: string): Promise<void>
+  applyProposal(proposal: AiProposal, selection: AiProposalSelection): Promise<void>
+  undoProposal(id: string): Promise<void>
   exportBackup(): Promise<AppBackup>
   importBackup(backup: AppBackup): Promise<void>
+  getDatabaseDiagnostics(): Promise<DatabaseDiagnostics>
   clearAllData(): Promise<void>
   setNotice(message: string | null): void
   reload(): Promise<void>
@@ -90,14 +102,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [news, setNews] = useState<NewsItem[]>([])
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [proposalHistory, setProposalHistory] = useState<AiProposalHistory[]>([])
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
 
   const reload = useCallback(async (persistence = persistenceRef.current) => {
     if (!persistence) return
-    const [nextTodos, nextConcerns, nextSources, nextNews, nextSessions, nextMessages, nextSettings] = await Promise.all([
+    const [nextTodos, nextConcerns, nextSources, nextNews, nextSessions, nextMessages, nextProposalHistory, nextSettings] = await Promise.all([
       persistence.listTodos(), persistence.listConcerns(), persistence.listSources(),
       persistence.listNews(), persistence.listSessions(), persistence.listMessages(),
-      persistence.getSettings(),
+      persistence.listProposalHistory(), persistence.getSettings(),
     ])
     setTodos(nextTodos)
     setConcerns(nextConcerns)
@@ -105,6 +118,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setNews(nextNews)
     setSessions(nextSessions)
     setMessages(nextMessages)
+    setProposalHistory(nextProposalHistory)
     setSettings(nextSettings)
   }, [])
 
@@ -312,23 +326,78 @@ export function AppProvider({ children }: { children: ReactNode }) {
     broadcastChange()
   }, [broadcastChange, sessions])
 
-  const applyProposal = useCallback(async (proposal: AiProposal) => {
+  const renameSession = useCallback(async (id: string, title: string) => {
+    const current = sessions.find((item) => item.id === id)
+    const nextTitle = title.trim()
+    if (!current || !nextTitle) return
+    const next = { ...current, title: nextTitle, updatedAt: nowIso() }
+    await persistenceRef.current!.saveSession(next)
+    setSessions((values) => values.map((item) => item.id === id ? next : item))
+    broadcastChange()
+  }, [broadcastChange, sessions])
+
+  const deleteSession = useCallback(async (id: string) => {
+    await persistenceRef.current!.deleteSession(id)
+    setSessions((values) => values.filter((item) => item.id !== id))
+    setMessages((values) => values.filter((item) => item.sessionId !== id))
+    broadcastChange()
+  }, [broadcastChange])
+
+  const applyProposal = useCallback(async (proposal: AiProposal, selection: AiProposalSelection) => {
+    const appliedAt = nowIso()
+    const concernChanges: AiProposalHistory['concernChanges'] = []
     for (const update of proposal.concernUpdates) {
+      if (!selection.concernIds.includes(update.id)) continue
       const current = concerns.find((item) => item.id === update.id)
       if (!current) continue
-      await updateConcern({ ...current, ...update, tags: update.tags ?? current.tags })
+      concernChanges.push({
+        before: current,
+        after: { ...current, ...update, tags: update.tags ?? current.tags, updatedAt: appliedAt },
+      })
     }
-    for (const todo of proposal.todoSuggestions) {
-      await createTodo({ title: todo.title, details: todo.details ?? '', priority: todo.priority ?? 'medium' })
+    const createdTodos: Todo[] = proposal.todoSuggestions.flatMap((todo, index) => {
+      if (!selection.todoIndexes.includes(index)) return []
+      return [{
+        id: newId(), title: todo.title.trim(), details: todo.details ?? '', status: 'pending',
+        priority: todo.priority ?? 'medium', dueAt: null, tags: [], createdAt: appliedAt, updatedAt: appliedAt,
+      }]
+    })
+    if (!concernChanges.length && !createdTodos.length) throw new Error('请至少选择一项建议')
+    const history: AiProposalHistory = {
+      id: newId(), overview: proposal.overview, appliedAt, undoneAt: null,
+      concernChanges, createdTodos,
     }
+    await persistenceRef.current!.applyProposalTransaction(history)
+    setConcerns((values) => values.map((item) => concernChanges.find((change) => change.after.id === item.id)?.after ?? item))
+    setTodos((values) => [...createdTodos, ...values])
+    setProposalHistory((values) => [history, ...values])
+    broadcastChange()
     setNotice('朱批已落，整理结果已写入本地')
-  }, [concerns, createTodo, updateConcern])
+  }, [broadcastChange, concerns])
+
+  const undoProposal = useCallback(async (id: string) => {
+    try {
+      const history = await persistenceRef.current!.undoProposalTransaction(id)
+      setConcerns((values) => values.map((item) => history.concernChanges.find((change) => change.before.id === item.id)?.before ?? item))
+      const todoIds = new Set(history.createdTodos.map((item) => item.id))
+      setTodos((values) => values.filter((item) => !todoIds.has(item.id)))
+      setProposalHistory((values) => values.map((item) => item.id === id ? history : item))
+      broadcastChange()
+      setNotice('最近一次 AI 朱批已撤销')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '撤销朱批失败')
+    }
+  }, [broadcastChange])
 
   const exportBackup = useCallback(() => persistenceRef.current!.exportBackup(), [])
   const importBackup = useCallback(async (backup: AppBackup) => {
     await persistenceRef.current!.importBackup(backup)
     await reload()
   }, [reload])
+  const getDatabaseDiagnostics = useCallback(
+    () => persistenceRef.current!.getDatabaseDiagnostics(),
+    [],
+  )
   const clearAllData = useCallback(async () => {
     await persistenceRef.current!.clearAll()
     await secretStore.lock()
@@ -336,15 +405,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [reload])
 
   const value = useMemo<AppContextValue>(() => ({
-    loading, error, notice, todos, concerns, sources, news, sessions, messages, settings,
+    loading, error, notice, todos, concerns, sources, news, sessions, messages, proposalHistory, settings,
     secretStore, assistant, createTodo, updateTodo, deleteTodo, captureConcern,
     updateConcern, deleteConcern, saveSource, addDefaultSources, deleteSource,
-    refreshNews, saveSettings, completeOnboarding, saveMessage, applyProposal,
-    exportBackup, importBackup, clearAllData, setNotice, reload,
+    refreshNews, saveSettings, completeOnboarding, saveMessage, renameSession, deleteSession, applyProposal, undoProposal,
+    exportBackup, importBackup, getDatabaseDiagnostics, clearAllData, setNotice, reload,
   }), [
-    addDefaultSources, applyProposal, captureConcern, clearAllData, completeOnboarding,
+    addDefaultSources, applyProposal, undoProposal, captureConcern, clearAllData, completeOnboarding,
     concerns, createTodo, deleteConcern, deleteSource, deleteTodo, error, exportBackup,
-    importBackup, loading, messages, news, notice, refreshNews, saveMessage, saveSettings,
+    importBackup, getDatabaseDiagnostics, loading, messages, proposalHistory, news, notice, refreshNews, saveMessage, renameSession, deleteSession, saveSettings,
     reload, saveSource, sessions, settings, sources, todos, updateConcern, updateTodo,
   ])
 

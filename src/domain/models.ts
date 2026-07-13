@@ -89,6 +89,40 @@ export interface AiProposal {
   todoSuggestions: TodoSuggestion[]
 }
 
+export interface AiProposalSelection {
+  concernIds: string[]
+  todoIndexes: number[]
+}
+
+export interface AiProposalHistory {
+  id: string
+  overview: string
+  appliedAt: string
+  undoneAt: string | null
+  concernChanges: Array<{ before: Concern; after: Concern }>
+  createdTodos: Todo[]
+}
+
+export interface ConcernSavedFilter {
+  id: string
+  name: string
+  query: string
+  status: Concern['status'] | 'all'
+  sourceType: Concern['sourceType'] | 'all'
+  tags: string[]
+}
+
+export interface ConcernLocalRule {
+  id: string
+  name: string
+  enabled: boolean
+  keywords: string[]
+  summaryTemplate: string
+  addTags: string[]
+  todoTemplate: string
+  todoPriority: TodoPriority
+}
+
 export interface AppSettings {
   model: 'deepseek-v4-flash' | 'deepseek-v4-pro'
   thinkingEnabled: boolean
@@ -101,6 +135,9 @@ export interface AppSettings {
   petEnabled: boolean
   petAlwaysOnTop: boolean
   petBounds: { x: number; y: number } | null
+  /** Versioned local organization preferences, persisted through app_settings and included in backups. */
+  concernFilters: ConcernSavedFilter[]
+  concernRules: ConcernLocalRule[]
 }
 
 export interface AppBackup {
@@ -112,7 +149,35 @@ export interface AppBackup {
   news: NewsItem[]
   sessions: ChatSession[]
   messages: ChatMessage[]
+  proposalHistory: AiProposalHistory[]
   settings: AppSettings
+}
+
+export interface DatabaseDiagnostics {
+  engine: 'sqlite' | 'localStorage'
+  status: 'healthy' | 'warning' | 'error'
+  schemaVersion: number | null
+  appliedMigrations: number
+  integrityMessage: string
+  foreignKeyIssues: number
+  checkedAt: string
+}
+
+export interface BackupInspection {
+  backup: AppBackup
+  counts: {
+    todos: number
+    concerns: number
+    sources: number
+    news: number
+    sessions: number
+    messages: number
+    proposalHistory: number
+    concernFilters: number
+    concernRules: number
+  }
+  warnings: string[]
+  fingerprint: string
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -126,4 +191,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   petEnabled: true,
   petAlwaysOnTop: true,
   petBounds: null,
+  concernFilters: [],
+  concernRules: [],
 }

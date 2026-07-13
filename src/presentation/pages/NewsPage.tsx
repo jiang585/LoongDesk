@@ -1,4 +1,4 @@
-import { AlertCircle, Clock3, ExternalLink, Link2, Plus, RefreshCw, Rss, Search, Trash2 } from 'lucide-react'
+import { Activity, AlertCircle, Clock3, ExternalLink, Link2, Plus, RefreshCw, Rss, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import type { ContentSource, NewsItem } from '../../domain/models'
@@ -7,6 +7,7 @@ import { isTauri } from '../../infrastructure/platform'
 import { useApp } from '../state/AppContext'
 import { EmptyState } from '../components/EmptyState'
 import { Modal } from '../components/Modal'
+import './v03.css'
 
 export function NewsPage() {
   const { news, sources, saveSource, deleteSource, refreshNews } = useApp()
@@ -14,6 +15,7 @@ export function NewsPage() {
   const [sourceFilter, setSourceFilter] = useState('all')
   const [adding, setAdding] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [checkingSource, setCheckingSource] = useState<string | null>(null)
   const sourceMap = new Map(sources.map((source) => [source.id, source]))
   const filtered = useMemo(() => news.filter((item) =>
     (sourceFilter === 'all' || sourceFilter === 'matched' || item.sourceId === sourceFilter) &&
@@ -28,11 +30,12 @@ export function NewsPage() {
   return <div className="page">
     <header className="page-heading"><div><span className="eyebrow">四方闻见</span><h1>今日奏报</h1><p>只保存标题、摘要与原文链接，详情在系统浏览器中打开。</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => setAdding(true)}><Plus size={16} /> 添加来源</button><button className="primary-button" disabled={refreshing} onClick={async () => { setRefreshing(true); await refreshNews(); setRefreshing(false) }}><RefreshCw className={refreshing ? 'spin' : ''} size={16} /> {refreshing ? '驿骑奔走…' : '刷新奏报'}</button></div></header>
     <section className="source-strip">
-      {sources.map((source) => <article className={`source-chip ${source.lastError ? 'has-error' : ''}`} key={source.id}>
-        <button className="source-main" onClick={() => setSourceFilter(sourceFilter === source.id ? 'all' : source.id)}><Rss size={16} /><span><strong>{source.name}</strong><small>{source.lastError ? '上次刷新失败' : source.lastFetchedAt ? `更新于 ${new Date(source.lastFetchedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : '尚未刷新'}</small></span></button>
+      {sources.map((source) => { const stale = !source.lastFetchedAt || Date.now() - Date.parse(source.lastFetchedAt) > 86_400_000; return <article className={`source-chip ${source.lastError ? 'has-error' : stale ? 'is-stale' : 'is-healthy'}`} key={source.id} title={source.lastError ?? (stale ? '超过 24 小时未成功刷新' : '来源健康')}>
+        <button className="source-main" onClick={() => setSourceFilter(sourceFilter === source.id ? 'all' : source.id)}><Rss size={16} /><span><strong>{source.name}</strong><small>{source.lastError ? `异常：${source.lastError.slice(0, 36)}` : source.lastFetchedAt ? `${stale ? '待检查' : '健康'} · ${new Date(source.lastFetchedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : '尚未检查'}</small></span></button>
+        <button className="source-health-check" disabled={checkingSource === source.id || !source.enabled} aria-label={`检查来源 ${source.name}`} onClick={async () => { setCheckingSource(source.id); await refreshNews(source.id); setCheckingSource(null) }}><Activity className={checkingSource === source.id ? 'spin' : ''} size={14} /></button>
         <button className="source-toggle" aria-label="启用来源" onClick={() => void saveSource({ ...source, enabled: !source.enabled })}><span className={source.enabled ? 'on' : ''} /></button>
         <button className="source-delete" onClick={() => confirm(`删除“${source.name}”及其缓存？`) && void deleteSource(source.id)} aria-label="删除来源"><Trash2 size={14} /></button>
-      </article>)}
+      </article> })}
       {!sources.length && <button className="source-chip add-source" onClick={() => setAdding(true)}><Plus size={18} /> 添加第一条奏报来源</button>}
     </section>
     <section className="paper-panel toolbar news-toolbar">

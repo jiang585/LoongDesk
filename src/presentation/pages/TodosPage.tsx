@@ -1,5 +1,6 @@
 import { Archive, CalendarDays, Check, Clock3, Edit3, Plus, Search, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import type { Todo, TodoPriority, TodoStatus } from '../../domain/models'
 import { useApp } from '../state/AppContext'
 import { EmptyState } from '../components/EmptyState'
@@ -17,6 +18,13 @@ export function TodosPage() {
   const [status, setStatus] = useState<'all' | TodoStatus>('pending')
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<Todo | null | 'new'>(null)
+  const location = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('quick') !== '1') return
+    setEditing('new')
+    void navigate('/todos', { replace: true })
+  }, [location.search, navigate])
   const filtered = useMemo(() => todos.filter((todo) =>
     (status === 'all' || todo.status === status) &&
     `${todo.title} ${todo.details} ${todo.tags.join(' ')}`.toLowerCase().includes(search.toLowerCase()),

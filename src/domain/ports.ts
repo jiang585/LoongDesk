@@ -1,5 +1,6 @@
 import type {
   AiProposal,
+  AiProposalHistory,
   AppBackup,
   AppSettings,
   ChatMessage,
@@ -8,6 +9,7 @@ import type {
   ContentSource,
   NewsItem,
   Todo,
+  DatabaseDiagnostics,
 } from './models'
 
 export interface TodoRepository {
@@ -35,6 +37,7 @@ export interface NewsRepository {
 export interface ChatRepository {
   listSessions(): Promise<ChatSession[]>
   saveSession(session: ChatSession): Promise<void>
+  deleteSession(id: string): Promise<void>
   listMessages(sessionId?: string): Promise<ChatMessage[]>
   saveMessage(message: ChatMessage): Promise<void>
 }
@@ -50,14 +53,22 @@ export interface BackupRepository {
   clearAll(): Promise<void>
 }
 
+export interface AiProposalRepository {
+  listProposalHistory(): Promise<AiProposalHistory[]>
+  applyProposalTransaction(history: AiProposalHistory): Promise<void>
+  undoProposalTransaction(id: string): Promise<AiProposalHistory>
+}
+
 export interface Persistence
   extends TodoRepository,
     ConcernRepository,
     NewsRepository,
     ChatRepository,
     SettingsRepository,
-    BackupRepository {
+    BackupRepository,
+    AiProposalRepository {
   init(): Promise<void>
+  getDatabaseDiagnostics(): Promise<DatabaseDiagnostics>
 }
 
 export interface FeedResult {

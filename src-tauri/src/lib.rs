@@ -14,30 +14,69 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{ipc::Channel, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    ipc::Channel, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use url::Url;
+
+mod desktop;
 
 const MAX_REMOTE_BYTES: usize = 2 * 1024 * 1024;
 const DEEPSEEK_URL: &str = "https://api.deepseek.com/chat/completions";
 
 #[tauri::command]
 fn read_dropped_text(paths: Vec<String>) -> Result<Vec<String>, String> {
+    extract_local_documents(paths)
+}
+
+fn extract_local_documents(paths: Vec<String>) -> Result<Vec<String>, String> {
     paths
         .into_iter()
         .take(8)
         .map(|path| {
             let lower = path.to_ascii_lowercase();
-            if !(lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".markdown")) {
-                return Err("小安子只接收 .txt 或 .md 文本文件".to_string());
+            let supported = [".txt", ".md", ".markdown", ".html", ".htm", ".pdf"]
+                .iter()
+                .any(|extension| lower.ends_with(extension));
+            if !supported {
+                return Err("仅支持 TXT、Markdown、HTML 与 PDF 文档".to_string());
             }
-            let metadata = fs::metadata(&path).map_err(|_| "无法读取拖入文件".to_string())?;
-            if metadata.len() > 1_048_576 {
-                return Err("拖入文件超过 1MB 限制".to_string());
+            let metadata = fs::metadata(&path).map_err(|_| "无法读取拖入文档".to_string())?;
+            if metadata.len() > 10 * 1_048_576 {
+                return Err("文档超过 10MB 本地提取限制".to_string());
             }
-            fs::read_to_string(&path).map_err(|_| "拖入文件不是可读取的 UTF-8 文本".to_string())
+            let text = if lower.ends_with(".pdf") {
+                pdf_extract::extract_text(&path)
+                    .map_err(|_| "PDF 无可提取文字，扫描件暂不支持 OCR".to_string())?
+            } else {
+                let raw = fs::read_to_string(&path)
+                    .map_err(|_| "文档不是可读取的 UTF-8 文本".to_string())?;
+                if lower.ends_with(".html") || lower.ends_with(".htm") {
+                    extract_safe_html_text(&raw)
+                } else {
+                    raw
+                }
+            };
+            let cleaned = clean_text(&text, 200_000);
+            if cleaned.len() < 2 {
+                Err("文档没有可收录的文字".to_string())
+            } else {
+                Ok(cleaned)
+            }
         })
         .collect()
+}
+
+fn extract_safe_html_text(source: &str) -> String {
+    let document = Html::parse_document(source);
+    let visible = Selector::parse("article p, main p, body p, body h1, body h2, body h3, body li")
+        .expect("static selector");
+    document
+        .select(&visible)
+        .map(|node| node.text().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[derive(Default)]
@@ -104,10 +143,11 @@ fn is_forbidden_ip(ip: IpAddr) -> bool {
                 || ip.octets()[0] == 0
         }
         IpAddr::V6(ip) => {
+            let first = ip.segments()[0];
             ip.is_loopback()
                 || ip.is_unspecified()
-                || ip.is_unique_local()
-                || ip.is_unicast_link_local()
+                || first & 0xfe00 == 0xfc00
+                || first & 0xffc0 == 0xfe80
                 || is_ipv6_documentation(ip)
         }
     }
@@ -428,11 +468,12 @@ async fn deepseek_json(request: AssistantRequest) -> Result<Value, String> {
 }
 
 fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "create_local_first_schema",
-        kind: MigrationKind::Up,
-        sql: r#"
+    vec![
+        Migration {
+            version: 1,
+            description: "create_local_first_schema",
+            kind: MigrationKind::Up,
+            sql: r#"
       CREATE TABLE IF NOT EXISTS todos (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL, priority TEXT NOT NULL, due_at TEXT, tags_json TEXT NOT NULL DEFAULT '[]',
@@ -465,22 +506,45 @@ fn migrations() -> Vec<Migration> {
       );
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
     "#,
-    }, Migration {
-        version: 2,
-        description: "deduplicate_concerns_and_enforce_hash_uniqueness",
-        kind: MigrationKind::Up,
-        sql: r#"
+        },
+        Migration {
+            version: 2,
+            description: "deduplicate_concerns_and_enforce_hash_uniqueness",
+            kind: MigrationKind::Up,
+            sql: r#"
           DELETE FROM concerns
           WHERE rowid NOT IN (SELECT MIN(rowid) FROM concerns GROUP BY content_hash);
           CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_unique_hash ON concerns(content_hash);
         "#,
-    }]
+        },
+        Migration {
+            version: 3,
+            description: "add_ai_proposal_history",
+            kind: MigrationKind::Up,
+            sql: r#"
+          CREATE TABLE IF NOT EXISTS ai_proposal_history (
+            id TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL,
+            undone_at TEXT,
+            history_json TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_ai_proposal_history_applied ON ai_proposal_history(applied_at DESC);
+        "#,
+        },
+    ]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(CancellationRegistry::default())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(desktop::handle_shortcut)
+                .build(),
+        )
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:yuan.db", migrations())
@@ -498,15 +562,16 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            let mut pet_builder = WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html#/pet".into()))
-                .title("小安子")
-                .inner_size(230.0, 320.0)
-                .min_inner_size(210.0, 280.0)
-                .decorations(false)
-                .transparent(true)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .resizable(false);
+            let mut pet_builder =
+                WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html#/pet".into()))
+                    .title("小安子")
+                    .inner_size(230.0, 320.0)
+                    .min_inner_size(210.0, 280.0)
+                    .decorations(false)
+                    .transparent(true)
+                    .always_on_top(true)
+                    .skip_taskbar(true)
+                    .resizable(false);
             if let Some(monitor) = app.primary_monitor()? {
                 let scale = monitor.scale_factor();
                 let work = monitor.work_area();
@@ -515,6 +580,7 @@ pub fn run() {
                 pet_builder = pet_builder.position(x.max(0.0), y.max(0.0));
             }
             pet_builder.build()?;
+            desktop::setup(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -524,17 +590,34 @@ pub fn run() {
             cancel_deepseek,
             deepseek_json,
             read_dropped_text,
+            desktop::desktop_preferences,
+            desktop::set_background_resident,
+            desktop::set_shortcuts_enabled,
         ])
         .build(tauri::generate_context!())
         .expect("error while building 御案");
 
     app.run(|app_handle, event| {
-        if let RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { .. }, .. } = event {
-            if label == "main" {
-                if let Some(pet) = app_handle.get_webview_window("pet") {
-                    let _ = pet.destroy();
+        if let RunEvent::WindowEvent { label, event, .. } = event {
+            match event {
+                WindowEvent::CloseRequested { api, .. } if label == "main" => {
+                    if desktop::should_keep_running(app_handle) {
+                        api.prevent_close();
+                        if let Some(main) = app_handle.get_webview_window("main") {
+                            let _ = main.hide();
+                        }
+                    } else {
+                        desktop::exit_app(app_handle);
+                    }
                 }
-                app_handle.exit(0);
+                WindowEvent::Moved(_)
+                | WindowEvent::Resized(_)
+                | WindowEvent::ScaleFactorChanged { .. }
+                    if label == "main" || label == "pet" =>
+                {
+                    desktop::capture_window(app_handle, &label)
+                }
+                _ => {}
             }
         }
     });
@@ -553,6 +636,25 @@ mod tests {
     }
 
     #[test]
+    fn blocks_private_and_documentation_ipv6_ranges() {
+        assert!(is_forbidden_ip("::1".parse().expect("valid loopback")));
+        assert!(is_forbidden_ip(
+            "fc00::1".parse().expect("valid unique local")
+        ));
+        assert!(is_forbidden_ip(
+            "fe80::1".parse().expect("valid link local")
+        ));
+        assert!(is_forbidden_ip(
+            "2001:db8::1".parse().expect("valid documentation")
+        ));
+        assert!(!is_forbidden_ip(
+            "2606:4700:4700::1111"
+                .parse()
+                .expect("valid public address")
+        ));
+    }
+
+    #[test]
     fn redacts_common_deepseek_errors() {
         assert_eq!(
             deepseek_error(401, "secret response"),
@@ -564,5 +666,16 @@ mod tests {
     #[test]
     fn cleans_remote_text() {
         assert_eq!(clean_text("  hello\n  world  ", 40), "hello world");
+    }
+
+    #[test]
+    fn extracts_visible_html_without_scripts_or_styles() {
+        let text = extract_safe_html_text(
+            "<style>.secret{}</style><body><script>steal()</script><main><h1>标题</h1><p>正文</p></main></body>",
+        );
+        assert!(text.contains("标题"));
+        assert!(text.contains("正文"));
+        assert!(!text.contains("steal"));
+        assert!(!text.contains("secret"));
     }
 }

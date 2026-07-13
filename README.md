@@ -4,7 +4,7 @@
   <p>像批阅奏折一样，管理待办、关心之事与今日奏报。</p>
 
   <p>
-    <a href="./package.json"><img src="https://img.shields.io/badge/version-0.1.1-9c3b2d" alt="Version 0.1.1" /></a>
+    <a href="./package.json"><img src="https://img.shields.io/badge/version-0.3.0-9c3b2d" alt="Version 0.3.0" /></a>
     <a href="https://v2.tauri.app/"><img src="https://img.shields.io/badge/Tauri-2-24c8db?logo=tauri&amp;logoColor=white" alt="Tauri 2" /></a>
     <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-6-3178c6?logo=typescript&amp;logoColor=white" alt="TypeScript 6" /></a>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-b3945d" alt="MIT License" /></a>
@@ -28,13 +28,15 @@
 ### 关心库与内容采集
 
 - 支持手工录入、显式粘贴、拖入文字和 HTTPS 链接。
-- 支持 `.txt`、`.md` 和 `.markdown` 文件导入。
+- 支持 `.txt`、`.md`、`.html` 和可提取文本的 `.pdf` 文件导入。
+- 支持原文全文检索、保存筛选器、批量归档/标签，以及本地规则模板。
 - 使用内容哈希与 SQLite 原子约束阻止重复收录。
-- 网页仅提取标题、摘要和原始链接，不在 WebView 中执行第三方脚本。
+- 网页仅提取标题、摘要和原始链接，可手动复查并对比内容变化；不在 WebView 中执行第三方脚本。
 
 ### 今日奏报
 
 - 支持 RSS/Atom 来源管理和手动刷新。
+- 提供单源健康检查、异常原因和陈旧状态提示。
 - 前台定时刷新，失败时显示本地缓存和最后更新时间。
 - 通过本地关键词与标签匹配关心事项，不依赖 AI。
 
@@ -42,6 +44,8 @@
 
 - 通过 DeepSeek 提供流式问答、关心库摘要、标签与待办建议。
 - 整理操作始终“先预览、后确认”，AI 不能直接修改本地数据。
+- AI 建议可逐项选择，事务落库后保留差异历史，并可安全撤销最近一次操作。
+- 支持聊天会话搜索、重命名、删除与 Markdown 导出。
 - 桌面端提供 Q 版始终置顶小安子，可展开轻量对话窗口。
 - 可将文字或文本文件拖到小安子窗口，直接加入关心库。
 - 主聊天与桌宠聊天分别保存会话，流式回复自动跟随到底部。
@@ -51,6 +55,8 @@
 - SQLite 保存待办、关心库、新闻缓存、聊天和非敏感设置。
 - Stronghold 加密保存 DeepSeek API Key，不写入数据库、日志或备份。
 - 支持 JSON 数据备份与恢复。
+- 支持数据库完整性诊断、备份校验指纹与恢复前预览。
+- 支持系统托盘、可选后台驻留、全局快捷键与签名自动更新流程。
 - 支持 100%、112% 和 125% 界面字号缩放，并遵循系统“减少动画”偏好。
 - 未配置 DeepSeek 或处于离线状态时，本地功能仍然可用。
 
@@ -105,6 +111,7 @@ npm run tauri dev
 | `npm run tauri dev` | 启动 Tauri 桌面开发版 |
 | `npm test` | 运行 TypeScript/Vitest 测试 |
 | `npm run test:e2e` | 运行 Playwright 端到端测试 |
+| `npm run test:e2e:tauri` | 通过 Tauri WebDriver 运行 Windows 原生端到端测试 |
 | `npm run lint` | 运行 Oxlint 静态检查 |
 | `npm run build` | 执行 TypeScript 检查并构建前端 |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | 运行 Rust 测试 |
@@ -176,24 +183,24 @@ Tauri IPC / SQLite / Stronghold / DeepSeek / RSS
 - [x] Q 版小安子桌宠、拖放采集与多窗口生命周期
 - [x] JSON 备份恢复、Windows NSIS 安装包和基础测试
 
-### v0.2 — 桌面体验与可靠性
+### v0.2 — 桌面体验与可靠性（已完成）
 
-- [ ] 系统托盘与用户可选的后台驻留模式
-- [ ] 全局快捷键唤起小安子和快速添加待办
-- [ ] 多显示器、不同 DPI 和窗口位置恢复测试
-- [ ] 数据库迁移诊断、备份校验与恢复预览
-- [ ] 聊天会话管理、搜索、重命名与导出
-- [ ] Windows 自动更新与签名发布流程
-- [ ] 完整 Tauri 桌面端端到端测试矩阵
+- [x] 系统托盘与用户可选的后台驻留模式
+- [x] 全局快捷键唤起小安子和快速添加待办
+- [x] 多显示器、不同 DPI 和窗口位置恢复测试
+- [x] 数据库迁移诊断、备份校验与恢复预览
+- [x] 聊天会话管理、搜索、重命名与导出
+- [x] Windows 自动更新与签名发布流程
+- [x] 完整 Tauri 桌面端端到端测试矩阵
 
-### v0.3 — 关心事项与信息处理
+### v0.3 — 关心事项与信息处理（已完成）
 
-- [ ] 关心库全文搜索、保存筛选器和批量操作
-- [ ] 网页关注项的手动复查与内容变化对比
-- [ ] 更多公开 RSS/Atom 分类源和来源健康检查
-- [ ] PDF、HTML 等格式的安全本地文本提取
-- [ ] 本地规则驱动的摘要模板、标签规则和待办模板
-- [ ] AI 提案的逐项选择、撤销记录和历史对比
+- [x] 关心库全文搜索、保存筛选器和批量操作
+- [x] 网页关注项的手动复查与内容变化对比
+- [x] 更多公开 RSS/Atom 分类源和来源健康检查
+- [x] PDF、HTML 等格式的安全本地文本提取
+- [x] 本地规则驱动的摘要模板、标签规则和待办模板
+- [x] AI 提案的逐项选择、撤销记录和历史对比
 
 ### v0.4 — Android 客户端
 
